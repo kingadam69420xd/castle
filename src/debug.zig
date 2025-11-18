@@ -12,7 +12,7 @@ const Indianness = enum {
     little,
 };
 
-const Opt = struct {
+pub const Opt = struct {
     byte_length: usize = 8,
     format: Format = .hex,
     print_string: bool = true,
@@ -26,7 +26,7 @@ pub fn dumpHex(src: anytype, opt: Opt) !void {
 
 pub fn dumpHexBytes(src: []const u8, opt: Opt) !void {
     if (opt.byte_length == 0) return error.ZeroByteLength;
-    if ((opt.byte_length % 2) != 0) return error.OddByteLength;
+    // if ((opt.byte_length % 2) != 0) return error.OddByteLength;
 
     var remaining = src;
     var counter: usize = 0;
