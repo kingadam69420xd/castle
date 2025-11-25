@@ -103,7 +103,7 @@ fn binaryLookup(byte: u8) [8]u8 {
     };
 }
 
-fn binaryLookupBool(byte: u8) [8]bool {
+pub fn binaryLookupBool(byte: u8) [8]bool {
     return .{
         if ((byte & 0b1000_0000) != 0) true else false,
         if ((byte & 0b0100_0000) != 0) true else false,

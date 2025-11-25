@@ -7,7 +7,9 @@ pub fn main() !void {
     defer {
         _ = gpa.deinit();
     }
+    try @import("slicers.zig").slicersTesticle(gpa.allocator());
+    // try @import("hashmaps.zig").hashmapsTesticle(gpa.allocator());
     // try @import("float_iee754.zig").floatTesticle(gpa.allocator());
-    try @import("hackers-delight/hacker.zig").hackerTesticle(gpa.allocator());
+    // try @import("hackers-delight/hacker.zig").hackerTesticle(gpa.allocator());
     print("godbye word!\n", .{});
 }
