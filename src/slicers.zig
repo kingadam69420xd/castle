@@ -3,7 +3,6 @@ const print = std.debug.print;
 
 pub fn slicersTesticle(alloc: std.mem.Allocator) !void {
     var array = try Array.init(alloc);
-    defer array.deinit();
     try array.push(1);
     try array.push(2);
     try array.push(3);
@@ -24,13 +23,38 @@ pub fn slicersTesticle(alloc: std.mem.Allocator) !void {
     defer b.deinit();
     b.printout("b");
 
-    var c = try b.sublist(2, 2);
+    var c = try b.sublist(1, 1);
     defer c.deinit();
     c.printout("c");
 
     var d = try a.sublist(-1, 1);
     defer d.deinit();
     d.printout("d");
+
+    try c.pushMut(21);
+    c.printout("c pushed");
+    a.printout("a having => c pushed");
+
+    try d.pushMut(333);
+    d.printout("d pushed mut!");
+
+    var e = try d.pushIMut(4000);
+    defer e.deinit();
+    e.printout("e from d pushed imut");
+    d.printout("d again");
+    printBool(e.array == d.array, "e and d arrays");
+    try e.pushMut(444);
+    try e.pushMut(101);
+    e.printout("e pushed mut");
+    d.printout("d again");
+    printBool(e.array == d.array, "e and d arrays again");
+
+    var f = try d.pushIMut(180);
+    defer f.deinit();
+    f.printout("f");
+    e.printout("e");
+    printBool(d.array == f.array, "d and f arrays");
+    printBool(e.array == f.array, "e and f arrays");
 }
 
 const View = struct {
@@ -112,6 +136,10 @@ const View = struct {
         return i + view.start;
     }
 
+    pub fn getExtent(view: View) usize {
+        return view.start + view.length;
+    }
+
     pub fn morphIndexToValid(view: View, element_pointer: i32) ?usize {
         const i = epIndex(view.length, element_pointer) orelse return null;
         if (i >= view.length) {
@@ -157,6 +185,10 @@ fn printInt(int: ?i32, tag: []const u8) void {
     if (int) |num| print("{s} => {}\n", .{ tag, num }) else print("{s} => null\n", .{tag});
 }
 
+fn printBool(boolean: bool, tag: []const u8) void {
+    print("{s} => {}\n", .{tag, boolean});
+}
+
 fn epAbsolute(length: usize, element_pointer: i32) i32 {
     return if (element_pointer >= 0) element_pointer else @as(i32, @intCast(length)) - ((-element_pointer) - 1);
 }
@@ -172,30 +204,29 @@ fn epIndex(length: usize, element_pointer: i32) ?usize {
 const Array = struct {
     const Self = @This();
 
-    e: []i32,
+    e: []?i32,
     count: usize,
     alloc: std.mem.Allocator,
+    refs: usize,
 
     pub fn init(alloc: std.mem.Allocator) !*Array {
         const result = try alloc.create(Array);
         result.* = .{
-            .e = &[_]i32{},
+            .e = &[_]?i32{},
             .count = 0,
             .alloc = alloc,
+            .refs = 0,
         };
         return result;
     }
 
-    pub fn push(self: *Self, value: i32) !void {
-        if (self.count >= self.e.len) {
-            const new_capacity = if (self.e.len == 0) 8 else self.e.len * 2;
-            self.e = try self.alloc.realloc(self.e, new_capacity);
-        }
-        self.e[self.count] = value;
-        self.count += 1;
+    pub fn push(self: *Self, value: ?i32) !void {
+        const index = self.count;
+        try self.setCount(index + 1);
+        self.e[index] = value;
     }
 
-    pub fn slice(self: *Self) []i32 {
+    pub fn slice(self: *Self) []?i32 {
         return self.e[0..self.count];
     }
 
@@ -203,7 +234,7 @@ const Array = struct {
         const s = self.slice();
         print("*~ARRAY-PRINT~* (length = {}) (ptr = 0x{X})\n", .{ s.len, @intFromPtr(self) });
         for (s, 0..) |item, i| {
-            print("[{}] ({} {}) => {}\n", .{ i, self.toView().getEP(i, .reversed), self.toView().getEP(i, .normal), item });
+            print("[{}] ({} {}) => {?}\n", .{ i, self.toView().getEP(i, .reversed), self.toView().getEP(i, .normal), item });
         }
     }
 
@@ -231,6 +262,26 @@ const Array = struct {
         return try List.new(self.alloc, self, try self.toView().trySubview(first, head));
     }
 
+    pub fn setCount(self: *Self, length: usize) !void {
+        if (length >= self.e.len) {
+            var new_capacity: usize = 8;
+            while (new_capacity <= self.e.len) : (new_capacity *= 2) {}
+            self.e = try self.alloc.realloc(self.e, new_capacity);
+        }
+        self.count = length;
+    }
+
+    pub fn addRef(self: *Self) void {
+        self.refs += 1;
+    }
+
+    pub fn removeRef(self: *Self) void {
+        self.refs -= 1;
+        if (self.refs == 0) {
+            self.deinit();
+        }
+    }
+
     pub fn top(self: *Self) i32 {
         return @intCast(self.count);
     }
@@ -242,7 +293,21 @@ const Array = struct {
         };
     }
 
+    pub fn copy(self: *Self, view: View) !*Self {
+        var result = try Self.init(self.alloc);
+        var it = view.iter();
+        while (it.next()) |index| {
+            try result.push(self.el(index));
+        }
+        return result;
+    }
+
+    // pub fn reformat(self: *Self, view: View) !*Self {
+        
+    // }
+
     pub fn deinit(self: *Self) void {
+        std.debug.assert(self.refs == 0);
         self.alloc.free(self.e);
         self.alloc.destroy(self);
     }
@@ -259,10 +324,6 @@ const Array = struct {
 
 const List = struct {
     const Self = @This();
-    const Mutability = enum {
-        mut,
-        imut,
-    };
 
     alloc: std.mem.Allocator,
     array: *Array,
@@ -277,10 +338,58 @@ const List = struct {
             .view = view,
         };
 
+        array.addRef();
+
         return result;
     }
 
+    pub fn pushMut(self: *Self, item: i32) !void {
+        switch (self.view.mode) {
+            .normal => {
+                try self.array.setCount(self.view.getExtent());
+                try self.array.push(item);
+                self.view.length += 1;
+            },
+            .reversed => {
+                // Reformat the list or copy it?
+                // try self.array.reformat(self.view);
+                self.array.removeRef();
+                self.array = try self.array.copy(self.view);
+                self.array.addRef();
+                self.view = self.array.toView();
+                try self.array.push(item);
+                self.view.length += 1;
+            },
+        }
+    }
+
+    pub fn pushIMut(self: *Self, item: i32) !*Self {
+        var array: *Array = self.array;
+        var view: View = View.empty;
+        switch (self.view.mode) {
+            .normal => {
+                const extent = self.view.getExtent();
+                if (extent == self.array.toView().getExtent()) {
+                    try array.push(item);
+                    view = self.view;
+                    view.length += 1;
+                } else {
+                    array = try self.array.copy(self.view);
+                    try array.push(item);
+                    view = array.toView();
+                }
+            },
+            .reversed => {
+                array = try self.array.copy(self.view);
+                try array.push(item);
+                view = array.toView();
+            }
+        }
+        return try List.new(self.alloc, array, view);
+    }
+
     pub fn deinit(self: *Self) void {
+        self.array.removeRef();
         self.alloc.destroy(self);
     }
 
